@@ -287,7 +287,7 @@ def main():
         shellcode = bytes(args.shellcode, encoding='utf-8')
         
     elif args.infile:
-        with open(f'{args.infile}', 'rb') as binfile:
+        with open(args.infile, 'rb') as binfile:
             shellcode = binfile.read()
     
     outfile = args.outfile
@@ -302,7 +302,7 @@ def main():
     build_pe = CreatePE(shellcode=shellcode)
     shellcode_pe = build_pe.get_pe()
 
-    with open(f'{outfile}', 'wb') as shellcode_file:
+    with open(outfile, 'wb') as shellcode_file:
         shellcode_file.write(shellcode_pe)
     
     logging.info(f'[+] PE written to: {outfile}')
