@@ -207,6 +207,7 @@ class CreatePE:
         self.optional_header += struct.pack('<I', 0x0)                       # LoaderFlags
         self.optional_header += struct.pack('<I', 0x10)                      # NumberOfRvaAndSizes
 
+
     def build_data_directories(self):
 
         self.data_directories += b'\x00' * 8   # ExportDirectory
@@ -273,7 +274,7 @@ def main():
 
     parser.add_argument('--infile', required=False, help='.bin file containing the shellcode')
     parser.add_argument('--shellcode', required=False, help='the shellcode to load as hex')
-    parser.add_argument('--outfile', required=False, help='output filename (default: shellcode.exe)')
+    parser.add_argument('--outfile', required=False, default='shellcode.exe', help='output filename (default: shellcode.exe)')
     parser.add_argument('--debug', required=False, help='x86dbg location')
     parser.add_argument('--cleanup', required=False, help='delete executable after running script')
 
@@ -284,8 +285,8 @@ def main():
         exit()
 
     elif args.shellcode:
-        shellcode = bytes(args.shellcode, encoding='utf-8')
-        
+        shellcode = bytes.fromhex(args.shellcode)
+
     elif args.infile:
         with open(args.infile, 'rb') as binfile:
             shellcode = binfile.read()
@@ -308,7 +309,7 @@ def main():
     logging.info(f'[+] PE written to: {outfile}')
 
     cwd = os.getcwd()
-    shellcode_exe = f'{cwd}\{outfile}'
+    shellcode_exe = os.path.join(cwd, outfile)
 
     if x64dbg_location:
         logging.info('[*] attaching debugger')
