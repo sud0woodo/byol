@@ -205,7 +205,7 @@ def build_file_header(optional_header_size: int):
     file_header += struct.pack('<I', 0x0)                   # NumberOfSymbols
     file_header += struct.pack('<H', optional_header_size)  # SizeOfOptionalHeader
     file_header += struct.pack(
-        'H',
+        '<H',
         CHARACTERISTICS.IMAGE_FILE_EXECUTABLE_IMAGE.value
     )                                                       # Characteristics -> 0x2 EXE / 0x2000 DLL
 
