@@ -7,6 +7,10 @@ from enum import Enum
 
 logging.basicConfig(level=logging.DEBUG, format='%(message)s')
 
+
+VA_BASE = 0x1000    # RVA from ImageBase
+
+
 DOS_STUB = b'This program cannot be run in DOS mode.\x0d\x0d\x0a\x24\x00\x00\x00\x00\x00\x00\x00'
 
 
@@ -80,192 +84,208 @@ class SECTION_FLAGS(Enum):
     IMAGE_SCN_MEM_WRITE                 = 0x80000000
 
 
-class CreatePE:
-    def __init__(self, shellcode: bytes):
-        self.shellcode              = shellcode
-
-        self.dos_header             = bytearray()
-        self.file_header            = bytearray()
-        self.optional_header        = bytearray()
-
-        self.data_directories       = bytearray()
-        self.section_table          = bytearray()
-        self.text_section           = bytearray()
-        self.idata_section          = bytearray()
-
-        self.import_table           = bytearray()
-
-        self.va_base                = 0x1000
-
-        # We build this in advance so we can calculate the
-        #  VirtualSize of the .text section for SizeOfImage
-        self.build_text_section()
-        self.build_data_directories()
-
-        self.virtual_size           = 0x200 * (int(len(self.text_section) / 0x200) + 1)
-        self.build_sections_table()
-
-        # Build the PE
-        self.build_dos_header()
-        self.build_optional_header()
-        self.build_file_header()
-
-    def get_pe(self):
-
-        # Build the headers
-        pe = self.dos_header
-        # Align COFF File Header to 0x100
-        pe += b'\x00' * (0x100 - len(pe))
-        pe += self.file_header
-        pe += self.optional_header 
-        pe += self.data_directories
-        pe += self.section_table
-         # Align .text section to 0x400
-        pe += b'\x00' * (0x400 - len(pe))
-        
-        pe += self.text_section
-
-        pe += b'\x00' * 64
-
-        logging.info(f"[*] final PE size: {len(pe)} bytes")
-
-        return pe
-
-    def build_dos_header(self):
-
-        self.dos_header = b'MZ'                     # Magic number
-        self.dos_header += struct.pack('<H', 0x0)   # Bytes on last page of file
-        self.dos_header += struct.pack('<H', 0x0)   # Pages in file
-        self.dos_header += struct.pack('<H', 0x0)   # Relocations
-        self.dos_header += struct.pack('<H', 0x0)   # Size of headers in paragraphs
-        self.dos_header += struct.pack('<H', 0x0)   # Minimum extra paragraphs needed
-        self.dos_header += struct.pack('<H', 0x0)   # Maximum extra paragraphs needed
-        self.dos_header += struct.pack('<H', 0x0)   # Initial SS value
-        self.dos_header += struct.pack('<H', 0x0)   # Initial SP value
-        self.dos_header += struct.pack('<H', 0x0)   # Checksum
-        self.dos_header += struct.pack('<H', 0x0)   # Initial IP value
-        self.dos_header += struct.pack('<H', 0x0)   # Initial CS value
-        self.dos_header += struct.pack('<H', 0x0)   # File address of relocation table
-        self.dos_header += struct.pack('<H', 0x0)   # Overlay number
-        self.dos_header += b'\x00' * 8              # Reserved words
-        self.dos_header += struct.pack('<H', 0x0)   # OEM Identifier
-        self.dos_header += struct.pack('<H', 0x0)   # OEM Information
-        self.dos_header += b'\x00' * 20             # Reserved words
-        self.dos_header += struct.pack('<I', 0x100) # location of file header (PE\0\0)
-
-        self.dos_header += DOS_STUB
-
-    def build_file_header(self):
-
-        optional_header_size = len(self.optional_header) + len(self.data_directories)
-
-        self.file_header += b'PE\x00\x00'
-        self.file_header += struct.pack('<H', 0x14c)         # 0x8664 -> x64 machine -> 0x14c x86
-        self.file_header += struct.pack('<H', 0x1)           # NumberOfSections
-        self.file_header += struct.pack('<I', 0x0)           # TimeDateStamp
-        self.file_header += struct.pack('<I', 0x0)           # PointerToSymbolTable
-        self.file_header += struct.pack('<I', 0x0)           # NumberOfSymbols
-        self.file_header += struct.pack('<H', optional_header_size) # SizeOfOptionalHeader
-        self.file_header += struct.pack(
-            'H',
-            CHARACTERISTICS.IMAGE_FILE_EXECUTABLE_IMAGE.value
-        )                                                   # Characteristics -> 0x2 EXE / 0x2000 DLL
-
-    def build_optional_header(self):
-        
-        # Since we align to 0x1000 we need to make sure to round upwards
-        size_of_image = 0x1000 * (int((self.va_base + self.virtual_size) / 0x1000) + 1)
-
-        self.optional_header += struct.pack('<H', 0x10b)                     # Magic (PE32)
-        self.optional_header += b'\x00'                                      # Linker version major
-        self.optional_header += b'\x00'                                      # Linker version minor
-        self.optional_header += struct.pack('<I', len(self.text_section))    # SizeOfCode
-        self.optional_header += struct.pack('<I', 0x0)                       # SizeOfInitializedData
-        self.optional_header += struct.pack('<I', 0x0)                       # SizeOfUninitializedData
-        self.optional_header += struct.pack('<I', self.va_base)              # AddressOfEntryPoint
-        self.optional_header += struct.pack('<I', self.va_base)              # BaseOfCode
-        self.optional_header += struct.pack('<I', 0x4000)                    # BaseOfData
-        self.optional_header += struct.pack('<I', 0x400000)                  # Imagebase
-        self.optional_header += struct.pack('<I', 0x1000)                    # SectionAlignment
-        self.optional_header += struct.pack('<I', 0x200)                     # FileAlignment
-        self.optional_header += struct.pack('<H', 0x5)                       # OS version major
-        self.optional_header += struct.pack('<H', 0x0)                       # OS version minor
-        self.optional_header += struct.pack('<H', 0x0)                       # Image version major
-        self.optional_header += struct.pack('<H', 0x0)                       # Image version minor
-        self.optional_header += struct.pack('<H', 0x5)                       # MajorSubsystemVersion
-        self.optional_header += struct.pack('<H', 0x0)                       # MinorSubsystemVersion
-        self.optional_header += struct.pack('<I', 0x0)                       # Win32 version
-        self.optional_header += struct.pack('<I', size_of_image)             # SizeOfImage
-        self.optional_header += struct.pack('<I', 0x200)                     # SizeOfHeaders
-        self.optional_header += struct.pack('<I', 0x0)                       # Checksum
-        self.optional_header += struct.pack('<H', 0x2)                       # Subsystem
-        self.optional_header += struct.pack('<H', 0x0)                       # Dllcharacteristics
-        self.optional_header += struct.pack('<I', 0x100000)                  # SizeOfStackReserve
-        self.optional_header += struct.pack('<I', 0x1000)                    # SizeOfStackCommit
-        self.optional_header += struct.pack('<I', 0x100000)                  # SizeOfHeapReserver
-        self.optional_header += struct.pack('<I', 0x1000)                    # SizeOfHeapCommits
-        self.optional_header += struct.pack('<I', 0x0)                       # LoaderFlags
-        self.optional_header += struct.pack('<I', 0x10)                      # NumberOfRvaAndSizes
-
-
-    def build_data_directories(self):
-
-        self.data_directories += b'\x00' * 8   # ExportDirectory
-        self.data_directories += b'\x00' * 8   # ImportDirectory
-        self.data_directories += b'\x00' * 8   # ResourceDirectory
-        self.data_directories += b'\x00' * 8   # ExceptionDirectory
-        self.data_directories += b'\x00' * 8   # SecurityDirectory
-        self.data_directories += b'\x00' * 8   # BaseRelocationTable
-        self.data_directories += b'\x00' * 8   # DebugDirectory
-        self.data_directories += b'\x00' * 8   # ArchitectureData
-        self.data_directories += b'\x00' * 8   # RVAOfGlobalPointer
-        self.data_directories += b'\x00' * 8   # TLS Directory
-        self.data_directories += b'\x00' * 8   # LoadConfigurationDirectory
-        self.data_directories += b'\x00' * 8   # BoundImportDirectoryHeaders
-        self.data_directories += b'\x00' * 8   # ImportAddressTable
-        self.data_directories += b'\x00' * 8   # DelayReloadImportDescriptors
-        self.data_directories += b'\x00' * 8   # .NETHeader
-        self.data_directories += b'\x00' * 8   # Reserved
-
-    def build_sections_table(self):
-
-        # .text
-        text_section = b'.text\x00\x00\x00'
-        text_section += struct.pack('<I', self.virtual_size)        # VirtualSize
-        text_section += struct.pack('<I', self.va_base)             # VirtualAddress
-        text_section += struct.pack('<I', len(self.text_section))   # SizeOfRawData
-        text_section += struct.pack('<I', 0x400)                    # PointerToRawData 
-        text_section += b'\x00' * 4                                 # PointerToRelocations
-        text_section += b'\x00' * 4                                 # PointerToLinenumbers 
-        text_section += b'\x00\x00'                                 # NumberOfRelocations 
-        text_section += b'\x00\x00'                                 # NumberOfLinenumbers 
-        # Set memory characteristics to RWX for executable code section
-        text_section_flags = (
-            SECTION_FLAGS.IMAGE_SCN_CNT_CODE.value 
-            + SECTION_FLAGS.IMAGE_SCN_MEM_EXECUTE.value 
-            + SECTION_FLAGS.IMAGE_SCN_MEM_READ.value 
-            + SECTION_FLAGS.IMAGE_SCN_MEM_WRITE.value
-        )
-        text_section += struct.pack('<I', text_section_flags)
-
-        self.section_table = text_section
-
-    def build_text_section(self):
-
-        # Adhering CDECL calling convention
-        # Save the base pointer and stack pointer
-        self.text_section += b'\x55'        # push ebp
-        self.text_section += b'\x8b\xec'    # mov ebp, esp
-
-        # Shellcode
-        self.text_section += self.shellcode
-
-        self.text_section += b'\x5d'        # pop ebp
-        self.text_section += b'\xc3'        # ret
-
-
 def attach_x64dbg(x64dbg_location:str, shellcode_exe: str):
     os.system(f'{x64dbg_location} {shellcode_exe}')
+
+
+def build_text_section(shellcode: bytes):
+
+    text_section = bytearray()
+
+    # Adhering CDECL calling convention
+    # Save the base pointer and stack pointer
+    text_section += b'\x55'     # push ebp
+    text_section += b'\x8b\xec' # mov ebp, esp
+
+    # Shellcode
+    text_section += shellcode
+
+    text_section += b'\x5d'     # pop ebp
+    text_section += b'\xc3'     # ret
+
+    return text_section
+
+
+def build_section_table(virtual_size: int, text_section_size: int):
+
+    section_table = bytearray()
+
+    # .text
+    section_table += b'.text\x00\x00\x00'                   # Name
+    section_table += struct.pack('<I', virtual_size)        # VirtualSize
+    section_table += struct.pack('<I', VA_BASE)             # VirtualAddress
+    section_table += struct.pack('<I', text_section_size)   # SizeOfRawData
+    section_table += struct.pack('<I', 0x400)               # PointerToRawData 
+    section_table += b'\x00' * 4                            # PointerToRelocations
+    section_table += b'\x00' * 4                            # PointerToLinenumbers 
+    section_table += b'\x00\x00'                            # NumberOfRelocations 
+    section_table += b'\x00\x00'                            # NumberOfLinenumbers 
+    # Set memory characteristics to RWX for executable code section
+    section_table_flags = (
+        SECTION_FLAGS.IMAGE_SCN_CNT_CODE.value 
+        + SECTION_FLAGS.IMAGE_SCN_MEM_EXECUTE.value 
+        + SECTION_FLAGS.IMAGE_SCN_MEM_READ.value 
+        + SECTION_FLAGS.IMAGE_SCN_MEM_WRITE.value
+    )
+    section_table += struct.pack('<I', section_table_flags)                               
+
+    return section_table
+
+
+def build_data_directories():
+
+    data_directories = bytearray()
+
+    data_directories += b'\x00' * 8   # ExportDirectory
+    data_directories += b'\x00' * 8   # ImportDirectory
+    data_directories += b'\x00' * 8   # ResourceDirectory
+    data_directories += b'\x00' * 8   # ExceptionDirectory
+    data_directories += b'\x00' * 8   # SecurityDirectory
+    data_directories += b'\x00' * 8   # BaseRelocationTable
+    data_directories += b'\x00' * 8   # DebugDirectory
+    data_directories += b'\x00' * 8   # ArchitectureData
+    data_directories += b'\x00' * 8   # RVAOfGlobalPointer
+    data_directories += b'\x00' * 8   # TLS Directory
+    data_directories += b'\x00' * 8   # LoadConfigurationDirectory
+    data_directories += b'\x00' * 8   # BoundImportDirectoryHeaders
+    data_directories += b'\x00' * 8   # ImportAddressTable
+    data_directories += b'\x00' * 8   # DelayReloadImportDescriptors
+    data_directories += b'\x00' * 8   # .NETHeader
+    data_directories += b'\x00' * 8   # Reserved
+
+    return data_directories
+
+def build_optional_header(text_section_size: int, size_of_image: int):
+
+    optional_header = bytearray()
+
+    optional_header += struct.pack('<H', 0x10b)             # Magic (PE32)
+    optional_header += b'\x00'                              # Linker version major
+    optional_header += b'\x00'                              # Linker version minor
+    optional_header += struct.pack('<I', text_section_size) # SizeOfCode
+    optional_header += struct.pack('<I', 0x0)               # SizeOfInitializedData
+    optional_header += struct.pack('<I', 0x0)               # SizeOfUninitializedData
+    optional_header += struct.pack('<I', VA_BASE)           # AddressOfEntryPoint
+    optional_header += struct.pack('<I', VA_BASE)           # BaseOfCode
+    optional_header += struct.pack('<I', 0x4000)            # BaseOfData
+    optional_header += struct.pack('<I', 0x400000)          # Imagebase
+    optional_header += struct.pack('<I', 0x1000)            # SectionAlignment
+    optional_header += struct.pack('<I', 0x200)             # FileAlignment
+    optional_header += struct.pack('<H', 0x5)               # OS version major
+    optional_header += struct.pack('<H', 0x0)               # OS version minor
+    optional_header += struct.pack('<H', 0x0)               # Image version major
+    optional_header += struct.pack('<H', 0x0)               # Image version minor
+    optional_header += struct.pack('<H', 0x5)               # MajorSubsystemVersion
+    optional_header += struct.pack('<H', 0x0)               # MinorSubsystemVersion
+    optional_header += struct.pack('<I', 0x0)               # Win32 version
+    optional_header += struct.pack('<I', size_of_image)     # SizeOfImage
+    optional_header += struct.pack('<I', 0x200)             # SizeOfHeaders
+    optional_header += struct.pack('<I', 0x0)               # Checksum
+    optional_header += struct.pack('<H', 0x2)               # Subsystem
+    optional_header += struct.pack('<H', 0x0)               # Dllcharacteristics
+    optional_header += struct.pack('<I', 0x100000)          # SizeOfStackReserve
+    optional_header += struct.pack('<I', 0x1000)            # SizeOfStackCommit
+    optional_header += struct.pack('<I', 0x100000)          # SizeOfHeapReserver
+    optional_header += struct.pack('<I', 0x1000)            # SizeOfHeapCommits
+    optional_header += struct.pack('<I', 0x0)               # LoaderFlags
+    optional_header += struct.pack('<I', 0x10)              # NumberOfRvaAndSizes
+
+    return optional_header
+
+
+def build_file_header(optional_header_size: int):
+
+    file_header = bytearray()
+
+    file_header += b'PE\x00\x00'
+    file_header += struct.pack('<H', 0x14c)                 # 0x8664 -> x64 machine -> 0x14c x86
+    file_header += struct.pack('<H', 0x1)                   # NumberOfSections
+    file_header += struct.pack('<I', 0x0)                   # TimeDateStamp
+    file_header += struct.pack('<I', 0x0)                   # PointerToSymbolTable
+    file_header += struct.pack('<I', 0x0)                   # NumberOfSymbols
+    file_header += struct.pack('<H', optional_header_size)  # SizeOfOptionalHeader
+    file_header += struct.pack(
+        'H',
+        CHARACTERISTICS.IMAGE_FILE_EXECUTABLE_IMAGE.value
+    )                                                       # Characteristics -> 0x2 EXE / 0x2000 DLL
+
+    return file_header
+
+
+def build_dos_header():
+
+    dos_header = bytearray()
+
+    dos_header += b'MZ'                    # Magic number
+    dos_header += struct.pack('<H', 0x0)   # Bytes on last page of file
+    dos_header += struct.pack('<H', 0x0)   # Pages in file
+    dos_header += struct.pack('<H', 0x0)   # Relocations
+    dos_header += struct.pack('<H', 0x0)   # Size of headers in paragraphs
+    dos_header += struct.pack('<H', 0x0)   # Minimum extra paragraphs needed
+    dos_header += struct.pack('<H', 0x0)   # Maximum extra paragraphs needed
+    dos_header += struct.pack('<H', 0x0)   # Initial SS value
+    dos_header += struct.pack('<H', 0x0)   # Initial SP value
+    dos_header += struct.pack('<H', 0x0)   # Checksum
+    dos_header += struct.pack('<H', 0x0)   # Initial IP value
+    dos_header += struct.pack('<H', 0x0)   # Initial CS value
+    dos_header += struct.pack('<H', 0x0)   # File address of relocation table
+    dos_header += struct.pack('<H', 0x0)   # Overlay number
+    dos_header += b'\x00' * 8              # Reserved words
+    dos_header += struct.pack('<H', 0x0)   # OEM Identifier
+    dos_header += struct.pack('<H', 0x0)   # OEM Information
+    dos_header += b'\x00' * 20             # Reserved words
+    dos_header += struct.pack('<I', 0x100) # location of file header (PE\0\0)
+
+    dos_header += DOS_STUB
+
+    return dos_header
+
+
+def build_pe(shellcode: bytes):
+
+    text_section = build_text_section(shellcode=shellcode)
+    text_section_size = len(text_section)
+
+    # FileAlignment 0x200
+    virtual_size = 0x200 * (int(len(text_section) / 0x200) + 1)
+
+    # SectionAlignment 0x1000
+    size_of_image = 0x1000 * (int((VA_BASE + virtual_size) / 0x1000) + 1)
+
+    # Build the Optional Header in advance
+    # we need the size of the Optional Header for the SizeOfOptionalHeader
+    # field in the COFF File Header
+    optional_header = build_optional_header(
+        text_section_size=text_section_size,
+        size_of_image=size_of_image
+    )
+    optional_header += build_data_directories()
+    optional_header_size = len(optional_header)
+
+    file_header = build_file_header(optional_header_size=optional_header_size)
+
+    section_table = build_section_table(
+        virtual_size=virtual_size,
+        text_section_size=text_section_size
+    )
+    
+    # Build the headers
+    pe = build_dos_header()
+
+    # Align COFF File Header to 0x100
+    pe += b'\x00' * (0x100 - len(pe))
+    pe += file_header
+
+    pe += optional_header 
+
+    pe += section_table
+
+     # Align .text section to 0x400
+    pe += b'\x00' * (0x400 - len(pe))
+    pe += text_section
+    pe += b'\x00' * 64
+
+    return pe
 
 
 def main():
@@ -300,8 +320,9 @@ def main():
 
     logging.info("[*] building PE")
 
-    build_pe = CreatePE(shellcode=shellcode)
-    shellcode_pe = build_pe.get_pe()
+    shellcode_pe = build_pe(shellcode=shellcode)
+
+    logging.info(f"[*] final PE size: {len(shellcode_pe)} bytes")
 
     with open(outfile, 'wb') as shellcode_file:
         shellcode_file.write(shellcode_pe)
