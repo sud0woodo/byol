@@ -280,7 +280,7 @@ def build_pe(shellcode: bytes):
 
     pe += section_table
 
-     # Align .text section to 0x400
+    # Align .text section to 0x400
     pe += b'\x00' * (0x400 - len(pe))
     pe += text_section
     pe += b'\x00' * 64
