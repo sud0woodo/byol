@@ -2,7 +2,7 @@
 
 Learning project to get familiar with the PE format, as well as to have a shellcode loader for reversing purposes.
 
-You can read [this](https://visit.suspect.network/reversing-adventures/building-a-pe-from-scratch) blogpost if you're interested in the learning project.
+You can read [this](https://visit.suspect.network/reversing-adventures/building-a-pe-from-scratch) blogpost if you're interested in the learning process.
 
 Currently only supports x86.
 
@@ -28,7 +28,7 @@ Load shellcode from a file, or from hexstring and attach x64dbg:
 python3 byol.py --shellcode 9090909090909090909090 --outfile shellcode.exe --debug C:\Users\user\Desktop\x32dbg.exe
 ```
 
-To cleanup the creating .exe file, simply add the `--cleanup` flag.
+To cleanup the created .exe file, simply add the `--cleanup` flag.
 
 ## TODO
 
